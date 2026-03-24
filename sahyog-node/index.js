@@ -9,6 +9,22 @@ const app     = express();
 const PORT    = process.env.PORT || 3000;
 const FASTAPI = process.env.FASTAPI_URL || "http://localhost:8000";
 
+// ── Simple structured logger ────────────────────────────────
+const log = {
+    info:  (msg, ...args) => console.log(`[${new Date().toISOString()}] INFO  ${msg}`, ...args),
+    warn:  (msg, ...args) => console.warn(`[${new Date().toISOString()}] WARN  ${msg}`, ...args),
+    error: (msg, ...args) => console.error(`[${new Date().toISOString()}] ERROR ${msg}`, ...args),
+};
+
+// Extract a useful error string from axios errors
+function errMsg(e) {
+    if (e?.response?.data) {
+        const d = e.response.data;
+        return `HTTP ${e.response.status} — ${typeof d === "object" ? JSON.stringify(d) : d}`;
+    }
+    return e?.code ? `${e.code}: ${e.message}` : (e?.message || String(e));
+}
+
 app.use(cors());
 app.use(express.json());
 app.use(fileUpload());
@@ -29,14 +45,17 @@ app.get("/health", async (req, res) => {
 // CREATE user
 app.post("/api/auth/register", async (req, res) => {
     try {
-        const { email, phone } = req.body;
+        const { firebase_uid, email, phone } = req.body;
         const form = new URLSearchParams();
+        if (firebase_uid) form.append("firebase_uid", firebase_uid);
         if (email) form.append("email", email);
         if (phone) form.append("phone", phone);
         const r = await axios.post(`${FASTAPI}/auth/register`, form);
+        log.info("Register  uid=%s  email=%s  is_new=%s", firebase_uid, email, r.data.is_new);
         res.json(r.data);
     } catch (e) {
-        res.status(500).json({ error: e.message });
+        log.error("Register failed: %s", errMsg(e));
+        res.status(500).json({ error: errMsg(e) });
     }
 });
 
@@ -141,6 +160,27 @@ app.get("/api/submissions/all", async (req, res) => {
     }
 });
 
+// ── CHAT (RAG AGENT) ──────────────────────────────────────
+
+app.post("/api/chat", async (req, res) => {
+    try {
+        const { user_id, message } = req.body;
+        if (!message) return res.status(400).json({ error: "message is required" });
+
+        const form = new URLSearchParams();
+        if (user_id) form.append("user_id", user_id);
+        form.append("message", message);
+
+        log.info("Chat  user=%s  msg=%s", user_id, message.slice(0, 60));
+        const r = await axios.post(`${FASTAPI}/chat`, form, { timeout: 120000 });
+        log.info("Chat  user=%s  schemes=%d", user_id, r.data.schemes?.length || 0);
+        res.json(r.data);
+    } catch (e) {
+        log.error("Chat proxy error: %s", errMsg(e));
+        res.status(500).json({ error: errMsg(e), reply: "Something went wrong. Please try again.", schemes: [] });
+    }
+});
+
 // ── VOICE TRANSCRIPTION ───────────────────────────────────
 
 // Receives audio blob from frontend, forwards to FastAPI /voice/transcribe
@@ -162,15 +202,15 @@ app.post("/api/voice/transcribe", async (req, res) => {
             maxBodyLength: Infinity,
         });
 
-        console.log(`🎤 Voice transcribed: "${r.data.text}"`);
-        res.json(r.data); // { text: "...", language: "hi" }
+        log.info("Voice transcribed [%s]: %s", r.data.language, r.data.text?.slice(0, 60));
+        res.json(r.data);
     } catch (e) {
-        console.error("Voice transcription error:", e.message);
-        res.status(500).json({ error: e.message, text: "" });
+        log.error("Voice transcription error: %s", errMsg(e));
+        res.status(500).json({ error: errMsg(e), text: "" });
     }
 });
 
 app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Node server running on http://0.0.0.0:${PORT}`);
-    console.log(`Forwarding to FastAPI at ${FASTAPI}`);
+    log.info("Node server listening on http://0.0.0.0:%s", PORT);
+    log.info("Forwarding API calls to FastAPI at %s", FASTAPI);
 });

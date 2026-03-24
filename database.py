@@ -1,10 +1,12 @@
 from sqlalchemy import (create_engine, Column, String, Text,
-                        DateTime, JSON, Integer, Boolean, Float, ForeignKey)
+                        DateTime, JSON, Integer, Boolean, Float, ForeignKey, text)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 from dotenv import load_dotenv
-import uuid, os
+import uuid, os, logging
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -30,12 +32,13 @@ def get_db():
 class User(Base):
     __tablename__ = "users"
 
-    id         = Column(String, primary_key=True, default=new_id)
-    email      = Column(String, unique=True, nullable=True)
-    phone      = Column(String, unique=True, nullable=True)
-    otp        = Column(String, nullable=True)
-    verified   = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id           = Column(String, primary_key=True, default=new_id)
+    firebase_uid = Column(String, unique=True, nullable=True)
+    email        = Column(String, unique=True, nullable=True)
+    phone        = Column(String, unique=True, nullable=True)
+    otp          = Column(String, nullable=True)
+    verified     = Column(Boolean, default=False)
+    created_at   = Column(DateTime, default=datetime.utcnow)
 
 # ─────────────────────────────────────────────────────────
 # TABLE 2 — GENERAL INFO
@@ -244,5 +247,15 @@ class CompiledSubmission(Base):
 # ─────────────────────────────────────────────────────────
 def init_db():
     Base.metadata.create_all(engine)
-    print("All PostgreSQL tables created")
+    # Add firebase_uid column to existing deployments that predate this column
+    with engine.connect() as conn:
+        try:
+            conn.execute(text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS firebase_uid VARCHAR UNIQUE"
+            ))
+            conn.commit()
+            logger.info("DB: firebase_uid column ensured on users table")
+        except Exception as e:
+            logger.debug("DB migration note: %s", e)
+    logger.info("DB: all tables ready")
 

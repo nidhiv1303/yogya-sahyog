@@ -1,29 +1,67 @@
 from fastapi import FastAPI, Form, Depends, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from typing import Optional, List
+from typing import Optional, List, Dict
 from database import (init_db, get_db, User, GeneralInfo, EducationDetails,
                       AgricultureDetails, HealthDetails, HousingDetails,
                       SocialWelfareDetails, BusinessDetails, JobsDetails,
                       Document, CompiledSubmission, new_id)
-import uvicorn, os, tempfile
+import uvicorn, os, tempfile, sys, logging, asyncio
+from concurrent.futures import ThreadPoolExecutor
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# ── Logging setup ───────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("sahyog")
+
+# ── Add rag/ to path so agent.chatbot can be imported ──────
+_rag_path = os.path.join(os.path.dirname(__file__), "rag")
+if _rag_path not in sys.path:
+    sys.path.insert(0, _rag_path)
 
 # ── Whisper model (loaded once at startup) ─────────────────
-# Install: pip install faster-whisper
-# Uses CUDA if available (RTX 5070), falls back to CPU
 try:
     from faster_whisper import WhisperModel
     _whisper = WhisperModel("base", device="auto", compute_type="auto")
     WHISPER_READY = True
-    print("✅ faster-whisper loaded (base model, auto device)")
+    logger.info("Whisper loaded (base model, auto device)")
 except ImportError:
     WHISPER_READY = False
-    print("⚠️  faster-whisper not installed. Run: pip install faster-whisper")
+    logger.warning("faster-whisper not installed — voice transcription disabled")
+
+# ── RAG agent pool (one agent per user_id, stored in memory) ─
+try:
+    from agent.chatbot import PolicyPilotAgent
+    RAG_READY = True
+    logger.info("RAG agent module loaded")
+except Exception as _e:
+    RAG_READY = False
+    logger.warning("RAG agent not available: %s", _e)
+
+_agents: Dict[str, "PolicyPilotAgent"] = {}
+_executor = ThreadPoolExecutor(max_workers=4)
+
+def _get_agent(user_id: str) -> "PolicyPilotAgent":
+    if user_id not in _agents:
+        _agents[user_id] = PolicyPilotAgent(user_id=user_id)
+        logger.info("Agent created for user %s", user_id)
+    return _agents[user_id]
 
 app = FastAPI(title="Sahyog API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-init_db()
+try:
+    init_db()
+    logger.info("DB initialized successfully")
+except Exception as _db_err:
+    logger.error("DB init failed — app will start but DB endpoints may fail: %s", _db_err)
 os.makedirs("uploads", exist_ok=True)
+logger.info("Sahyog FastAPI ready")
 
 # ── HEALTH ────────────────────────────────────────────────
 
@@ -35,35 +73,56 @@ def health():
 
 @app.post("/auth/register")
 def register(
-    email: Optional[str] = Form(None),
-    phone: Optional[str] = Form(None),
-    db:    Session       = Depends(get_db)
+    firebase_uid: Optional[str] = Form(None),
+    email:        Optional[str] = Form(None),
+    phone:        Optional[str] = Form(None),
+    db:           Session       = Depends(get_db)
 ):
+    # Look up existing user — firebase_uid wins, then email, then phone
     existing = None
-    if email:
+    if firebase_uid:
+        try:
+            existing = db.query(User).filter(User.firebase_uid == firebase_uid).first()
+        except Exception as _e:
+            logger.warning("firebase_uid lookup failed (column may be new): %s", _e)
+            db.rollback()
+    if not existing and email:
         existing = db.query(User).filter(User.email == email).first()
-    elif phone:
+    if not existing and phone:
         existing = db.query(User).filter(User.phone == phone).first()
 
     if existing:
+        # Backfill firebase_uid if missing
+        if firebase_uid and not getattr(existing, 'firebase_uid', None):
+            try:
+                existing.firebase_uid = firebase_uid
+                db.commit()
+                logger.info("Backfilled firebase_uid for user %s", existing.id)
+            except Exception as _e:
+                logger.warning("Could not backfill firebase_uid: %s", _e)
+                db.rollback()
+        logger.info("Returning existing user %s (firebase_uid=%s)", existing.id, firebase_uid)
         return {
             "user_id": existing.id,
             "is_new":  False,
             "message": "Welcome back",
             "email":   existing.email,
-            "phone":   existing.phone
+            "phone":   existing.phone,
         }
 
-    user = User(email=email, phone=phone, verified=True)
+    # Use firebase_uid as the primary key so it matches across the system
+    user_id = firebase_uid if firebase_uid else new_id()
+    user = User(id=user_id, firebase_uid=firebase_uid, email=email, phone=phone, verified=True)
     db.add(user)
     db.commit()
     db.refresh(user)
+    logger.info("Registered new user %s (email=%s)", user.id, email)
     return {
         "user_id": user.id,
         "is_new":  True,
         "message": "User created successfully",
         "email":   user.email,
-        "phone":   user.phone
+        "phone":   user.phone,
     }
 
 # ── STEP 2: GENERAL INFO ──────────────────────────────────
@@ -408,6 +467,33 @@ def get_all_submissions(db: Session = Depends(get_db)):
         ]
     }
 
+# ── CHAT (RAG AGENT) ──────────────────────────────────────
+
+def _agent_chat(user_id: str, message: str) -> dict:
+    """Runs in thread executor — blocks on LLM calls."""
+    agent = _get_agent(user_id)
+    return agent.chat(message)
+
+@app.post("/chat")
+async def chat_endpoint(
+    user_id: Optional[str] = Form(None),
+    message: str           = Form(...),
+):
+    if not RAG_READY:
+        return {
+            "reply": "AI agent is unavailable right now. Please check server logs.",
+            "schemes": [],
+        }
+    uid = user_id or "anonymous"
+    logger.info("Chat  user=%s  msg=%s", uid, message[:60])
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(_executor, _agent_chat, uid, message)
+    schemes = result.get("schemes", []) if isinstance(result, dict) else []
+    reply   = result.get("reply", result) if isinstance(result, dict) else result
+    logger.info("Chat  user=%s  schemes=%d  reply_len=%d", uid, len(schemes), len(reply))
+    return {"reply": reply, "schemes": schemes}
+
+
 # ── VOICE TRANSCRIPTION ───────────────────────────────────
 
 @app.post("/voice/transcribe")
@@ -427,10 +513,10 @@ async def transcribe_voice(audio: UploadFile = File(...)):
         # language=None → auto-detect (handles Hindi, Gujarati, English)
         segments, info = _whisper.transcribe(tmp_path, language=None, beam_size=5)
         text = " ".join(seg.text for seg in segments).strip()
-        print(f"🎤 Transcribed [{info.language}]: {text}")
+        logger.info("Voice transcribed [%s]: %s", info.language, text[:80])
         return {"text": text, "language": info.language}
     except Exception as e:
-        print(f"❌ Transcription error: {e}")
+        logger.error("Voice transcription error: %s", e)
         return {"text": "", "error": str(e)}
     finally:
         os.unlink(tmp_path)

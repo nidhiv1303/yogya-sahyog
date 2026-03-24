@@ -1,8 +1,9 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Mic, Globe, Search, ArrowLeft, Sun, Moon, Bell, CheckCircle2 } from 'lucide-react';
+import { Send, Globe, Search, ArrowLeft, Sun, Moon, Bell, CheckCircle2, Loader2 } from 'lucide-react';
+import { sendChatMessage } from '../api';
 
-/* ── MOCK DATA ── */
+/* ── DEFAULT SCHEME shown before any chat ── */
 const DEFAULT_SCHEME = {
   id: 'pm-kisan',
   name: 'Pradhan Mantri Kisan Samman Nidhi (PM-KISAN)',
@@ -12,37 +13,44 @@ const DEFAULT_SCHEME = {
   documents: ['Aadhaar Card', 'Land holding papers (7/12 extract)', 'Bank account details (linked with Aadhaar)', 'Passport size photo'],
   faqs: [
     { q: 'Who is eligible?', a: 'All landholding farmer families with cultivable land holding.' },
-    { q: 'When is the installment given?', a: 'Every 4 months (April-July, Aug-Nov, Dec-March).' }
-  ]
+    { q: 'When is the installment given?', a: 'Every 4 months (April-July, Aug-Nov, Dec-March).' },
+  ],
 };
-
-const MOCK_MATCHES = [
-  DEFAULT_SCHEME,
-  { id: 'ayushman', name: 'Ayushman Bharat PM-JAY', match: 88, description: 'Health insurance cover of up to ₹5 lakh per family per year.', benefits: ['₹5 Lakh cover', 'Cashless treatment'], documents: ['Aadhaar', 'Income Certificate'] },
-  { id: 'mudra', name: 'PMMY (Mudra Loan)', match: 72, description: 'Loans up to ₹10 lakh to non-corporate, non-farm small/micro enterprises.', benefits: ['Up to ₹10L loan', 'No collateral'], documents: ['Aadhaar', 'Business Plan'] }
-];
 
 
 // ── DASHBOARD LAYOUT ROOT ──
 export default function Dashboard() {
   const [theme, setTheme] = useState('light');
   const [lang, setLang] = useState('en');
-  
+
   // States: 'default', 'results', 'detail'
-  const [middleState, setMiddleState] = useState('default'); 
+  const [middleState, setMiddleState] = useState('default');
   const [selectedScheme, setSelectedScheme] = useState(DEFAULT_SCHEME);
+  const [matchedSchemes, setMatchedSchemes] = useState([]);
   const [chatMessages, setChatMessages] = useState([
     { role: 'bot', text: 'Namaste! I am Yogya AI. How can I assist you with government schemes today?' }
   ]);
+  const [chatLoading, setChatLoading] = useState(false);
 
-  const handleSimulateChatMatch = () => {
-    // Simulate AI returning schemes
-    setChatMessages(prev => [
-      ...prev, 
-      { role: 'user', text: 'I am a farmer looking for support.' },
-      { role: 'bot', text: 'I found 3 matching schemes for you based on your profile as a farmer. Check the middle section for details.', hasSchemes: true }
-    ]);
-    setMiddleState('results');
+  const handleChatSend = async (message) => {
+    if (!message.trim()) return;
+    const userId = localStorage.getItem('yogya_user_id') || '';
+    setChatMessages(prev => [...prev, { role: 'user', text: message }]);
+    setChatLoading(true);
+    try {
+      const data = await sendChatMessage(userId, message);
+      const reply = data.reply || 'Sorry, I could not get a response.';
+      const schemes = data.schemes || [];
+      setChatMessages(prev => [...prev, { role: 'bot', text: reply, hasSchemes: schemes.length > 0 }]);
+      if (schemes.length > 0) {
+        setMatchedSchemes(schemes);
+        setMiddleState('results');
+      }
+    } catch {
+      setChatMessages(prev => [...prev, { role: 'bot', text: 'Something went wrong. Please try again.' }]);
+    } finally {
+      setChatLoading(false);
+    }
   };
 
   const handleViewScheme = (scheme) => {
@@ -120,10 +128,10 @@ export default function Dashboard() {
           <div className="max-w-4xl w-full mx-auto p-8">
             <AnimatePresence mode="wait">
               {middleState === 'default' && (
-                <MiddleDefaultView key="default" scheme={DEFAULT_SCHEME} onSimulateChat={handleSimulateChatMatch} theme={theme} />
+                <MiddleDefaultView key="default" scheme={DEFAULT_SCHEME} onSimulateChat={() => handleChatSend('I am a farmer looking for support')} theme={theme} />
               )}
               {middleState === 'results' && (
-                <MiddleResultsView key="results" schemes={MOCK_MATCHES} onView={handleViewScheme} theme={theme} />
+                <MiddleResultsView key="results" schemes={matchedSchemes} onView={handleViewScheme} theme={theme} />
               )}
               {middleState === 'detail' && (
                 <MiddleDetailView key="detail" scheme={selectedScheme} onBack={() => setMiddleState('results')} theme={theme} />
@@ -134,10 +142,11 @@ export default function Dashboard() {
 
         {/* 3. RIGHT COLUMN - Yogya AI Chatbot */}
         <aside className={`w-[360px] flex-shrink-0 flex flex-col border-l transition-colors relative ${theme === 'dark' ? 'border-[#334155] bg-[#1E293B]' : 'border-[#E2E8F0] bg-white'}`}>
-           <RightChatBot 
-             messages={chatMessages} 
-             theme={theme} 
-             onSimulateMatch={handleSimulateChatMatch}
+           <RightChatBot
+             messages={chatMessages}
+             theme={theme}
+             loading={chatLoading}
+             onSend={handleChatSend}
            />
         </aside>
 
@@ -294,9 +303,27 @@ function MiddleDetailView({ scheme, onBack, theme }) {
 
 /* ─── RIGHT CHATBOT (YOGYA AI) ─── */
 
-function RightChatBot({ messages, theme, onSimulateMatch }) {
-  const [inputTitle, setInputTitle] = useState('');
-  const [chatLang, setChatLang] = useState('EN');
+function RightChatBot({ messages, theme, loading, onSend }) {
+  const [input, setInput] = useState('');
+  const messagesEndRef = useRef(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, loading]);
+
+  const handleSend = () => {
+    const msg = input.trim();
+    if (!msg || loading) return;
+    setInput('');
+    onSend(msg);
+  };
+
+  const handleKey = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
 
   return (
     <div className="flex flex-col h-full w-full relative">
@@ -311,75 +338,64 @@ function RightChatBot({ messages, theme, onSimulateMatch }) {
              </div>
              <div>
                 <h3 className="font-bold text-sm">Yogya AI</h3>
-                <span className="text-[10px] font-medium text-[#147B5D] bg-[#147B5D]/10 px-1.5 py-0.5 rounded-full inline-block mt-0.5">Online</span>
+                <span className="text-[10px] font-medium text-[#147B5D] bg-[#147B5D]/10 px-1.5 py-0.5 rounded-full inline-block mt-0.5">
+                  {loading ? 'Thinking...' : 'Online'}
+                </span>
              </div>
           </div>
        </div>
 
-       {/* Floating Popup Demo */}
-       <div className="absolute top-20 left-4 right-4 z-20">
-         <div className={`p-3 rounded-xl border text-xs shadow-lg animate-bounce ${theme === 'dark' ? 'bg-[#0F172A] border-[#D97706]/40 text-[#CBD5E1]' : 'bg-[#FFF8F0] border-[#D97706]/30 text-[#0F172A]'}`}>
-            <strong className="text-[#D97706] block mb-1">Scholarship Structure Classification</strong>
-            AI identified potential student status. Upload marksheet for classification.
-         </div>
-       </div>
-
        {/* Messages Area */}
        <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${theme === 'dark' ? 'bg-[#0B1121]' : 'bg-[#F8FAFC]'}`}>
-          <div className="pt-16" /> {/* Spacer for popup */}
           {messages.map((m, i) => (
              <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm shadow-sm ${
-                   m.role === 'user' 
-                    ? 'bg-[#147B5D] text-white rounded-br-sm' 
+                <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm shadow-sm whitespace-pre-wrap ${
+                   m.role === 'user'
+                    ? 'bg-[#147B5D] text-white rounded-br-sm'
                     : theme === 'dark' ? 'bg-[#1E293B] text-[#F8FAFC] border border-[#334155] rounded-bl-sm' : 'bg-white text-[#0F172A] border border-[#E2E8F0] rounded-bl-sm'
                 }`}>
                    {m.text}
                    {m.hasSchemes && (
-                     <div className={`mt-3 p-2 rounded-lg text-xs font-bold text-center border cursor-pointer hover:bg-opacity-80 transition-colors ${theme === 'dark' ? 'bg-[#0F172A] border-[#147B5D]/40 text-[#147B5D]' : 'bg-[#F1F5F9] border-[#147B5D]/30 text-[#147B5D]'}`}>
-                       View Matches (Middle Area)
+                     <div className={`mt-3 p-2 rounded-lg text-xs font-bold text-center border ${theme === 'dark' ? 'bg-[#0F172A] border-[#147B5D]/40 text-[#147B5D]' : 'bg-[#F1F5F9] border-[#147B5D]/30 text-[#147B5D]'}`}>
+                       Schemes shown in middle panel
                      </div>
                    )}
                 </div>
              </div>
           ))}
+          {loading && (
+            <div className="flex justify-start">
+              <div className={`rounded-2xl px-4 py-3 text-sm shadow-sm rounded-bl-sm flex items-center gap-2 ${theme === 'dark' ? 'bg-[#1E293B] text-[#94A3B8]' : 'bg-white text-[#64748B] border border-[#E2E8F0]'}`}>
+                <Loader2 size={14} className="animate-spin" /> Yogya is thinking...
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
        </div>
 
        {/* Input Area */}
        <div className={`p-4 border-t ${theme === 'dark' ? 'bg-[#1E293B] border-[#334155]' : 'bg-white border-[#E2E8F0]'}`}>
           <div className={`flex items-end gap-2 rounded-2xl px-2 py-2 border focus-within:ring-2 focus-within:ring-[#147B5D]/30 transition-shadow ${theme === 'dark' ? 'bg-[#0F172A] border-[#334155]' : 'bg-[#F8FAFC] border-[#CBD5E1]'}`}>
-             
-             {/* Chat Lang Toggle */}
-             <button 
-               onClick={() => setChatLang(l => l === 'EN' ? 'HI' : 'EN')}
-               className={`h-8 px-2 rounded-lg text-[10px] font-bold flex flex-col items-center justify-center transition-colors ${theme === 'dark' ? 'bg-[#334155] text-white hover:bg-[#475569]' : 'bg-[#E2E8F0] text-[#0F172A] hover:bg-[#CBD5E1]'}`}>
-                {chatLang}
-             </button>
 
-             {/* Voice Input */}
-             <button className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${theme === 'dark' ? 'text-[#94A3B8] hover:text-white hover:bg-[#334155]' : 'text-[#64748B] hover:text-[#0F172A] hover:bg-[#E2E8F0]'}`}>
-               <Mic size={16} />
-             </button>
-
-             <textarea 
-               value={inputTitle}
-               onChange={e => setInputTitle(e.target.value)}
+             <textarea
+               value={input}
+               onChange={e => setInput(e.target.value)}
+               onKeyDown={handleKey}
                placeholder="Type in English or Hindi..."
                rows={1}
-               className="flex-1 resize-none bg-transparent border-none outline-none text-sm py-1.5 text-inherit placeholder-[#94A3B8]"
+               disabled={loading}
+               className="flex-1 resize-none bg-transparent border-none outline-none text-sm py-1.5 text-inherit placeholder-[#94A3B8] disabled:opacity-50"
              />
 
              {/* Send Button */}
-             <button 
-               onClick={() => {
-                 onSimulateMatch();
-                 setInputTitle('');
-               }}
-               className="btn-glow w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0">
-               <Send size={14} className="ml-0.5" />
+             <button
+               onClick={handleSend}
+               disabled={!input.trim() || loading}
+               className="btn-glow w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 disabled:opacity-40">
+               {loading ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} className="ml-0.5" />}
              </button>
           </div>
        </div>
     </div>
-  )
+  );
 }

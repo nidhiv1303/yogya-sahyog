@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  onAuthStateChanged,
 } from 'firebase/auth';
 import { auth } from '../firebase';
 import { registerUser } from '../api';
@@ -35,6 +36,26 @@ export default function Register() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  // Auto-login: if Firebase session is already active, skip registration
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (!user) return;
+      const profileComplete = !!localStorage.getItem('user_name');
+      if (profileComplete) {
+        // Returning user with a complete profile — go straight to dashboard
+        navigate('/dashboard', { replace: true });
+        return;
+      }
+      // Firebase session restored but profile not yet saved — pre-fill + skip to step 2
+      localStorage.setItem('yogya_user_id', user.uid);
+      localStorage.setItem('yogya_email', user.email || '');
+      setUserId(user.uid);
+      setFormData(prev => ({ ...prev, email: user.email || '' }));
+      setStep(2);
+    });
+    return () => unsubscribe();
+  }, [navigate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleChange = (e) => {
     setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));

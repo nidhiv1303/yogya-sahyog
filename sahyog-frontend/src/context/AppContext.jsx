@@ -1,4 +1,6 @@
-import { createContext, useContext, useState, useCallback } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth } from '../firebase';
 
 const AppContext = createContext();
 
@@ -71,6 +73,21 @@ export function AppProvider({ children }) {
   const [schemesDrawerOpen, setSchemesDrawerOpen] = useState(false);
   const [docsCount, setDocsCount] = useState(0);
   const [matchedCount, setMatchedCount] = useState(0);
+
+  // Keep user_id in sync with Firebase auth session
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        const stored = localStorage.getItem('yogya_user_id');
+        if (stored !== user.uid) {
+          localStorage.setItem('yogya_user_id', user.uid);
+          localStorage.setItem('yogya_email', user.email || '');
+          setUserIdState(user.uid);
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   // Saved schemes from localStorage
   const getSavedSchemes = () => {
