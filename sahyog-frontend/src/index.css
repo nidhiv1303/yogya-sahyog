@@ -1,0 +1,223 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/forms";
+
+@theme {
+  --color-primary: #147B5D;
+  --color-primary-dark: #15803D;
+  --color-primary-light: #22c55e;
+  --color-saffron: #D97706;
+  --color-saffron-light: #F59E0B;
+  --color-slate-900: #0F172A;
+  --color-slate-600: #4B5563;
+  --color-surface: #F8FAFC;
+  --color-surface-alt: #F1F5F9;
+  --font-family-sans: 'Inter', system-ui, sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  background: #FFFFFF;
+  min-height: 100vh;
+  color: var(--color-slate-600);
+}
+
+#root { width: 100%; min-height: 100vh; }
+
+/* ─── Custom scrollbar ─── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--color-surface); }
+::-webkit-scrollbar-thumb { background: rgba(20,123,93,0.3); border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(20,123,93,0.5); }
+
+/* ─── Custom cursor ─── */
+* { cursor: none !important; }
+
+.cursor-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--color-primary);
+  border-radius: 50%;
+  position: fixed;
+  pointer-events: none;
+  z-index: 99999;
+  transform: translate(-50%, -50%);
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  box-shadow: 0 0 10px rgba(20,123,93,0.6), 0 0 20px rgba(20,123,93,0.4);
+}
+
+.cursor-ring {
+  width: 36px;
+  height: 36px;
+  border: 2px solid rgba(20,123,93,0.3);
+  border-radius: 50%;
+  position: fixed;
+  pointer-events: none;
+  z-index: 99998;
+  transform: translate(-50%, -50%);
+  transition: width 0.2s ease, height 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.cursor-trail {
+  position: fixed;
+  pointer-events: none;
+  z-index: 99997;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  animation: trailFade 0.6s ease forwards;
+}
+
+@keyframes trailFade {
+  0%   { opacity: 0.8; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0;   transform: translate(-50%, -50%) scale(0.1); }
+}
+
+/* ─── Glass morphism ─── */
+.glass {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(20, 123, 93, 0.1);
+  box-shadow: 0 8px 32px rgba(15, 23, 42, 0.04);
+}
+
+.glass-dark {
+  background: rgba(15, 23, 42, 0.8);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.glass-white {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(241, 245, 249, 1);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.05);
+}
+
+/* ─── Glass panel — dashboard and cards ─── */
+.glass-panel {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.05),
+    0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  border-radius: 12px;
+}
+
+/* ─── Glow button — Primary Green ─── */
+.btn-glow {
+  background: var(--color-primary);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  font-weight: 500;
+  box-shadow: 0 4px 14px 0 rgba(20, 123, 93, 0.39);
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+.btn-glow:hover {
+  background: var(--color-primary-dark);
+  box-shadow: 0 6px 20px rgba(20, 123, 93, 0.4);
+  transform: translateY(-2px);
+}
+.btn-glow:active {
+  transform: translateY(1px);
+}
+
+/* ─── Glow button — Secondary Amber ─── */
+.btn-glow-amber {
+  background: var(--color-saffron);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  font-weight: 500;
+  box-shadow: 0 4px 14px 0 rgba(217, 119, 6, 0.39);
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+.btn-glow-amber:hover {
+  background: var(--color-saffron-light);
+  box-shadow: 0 6px 20px rgba(217, 119, 6, 0.4);
+  transform: translateY(-2px);
+}
+.btn-glow-amber:active { transform: translateY(1px); }
+
+/* ─── 3D Card ─── */
+.card-3d {
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(248,250,252,0.8) 100%);
+  border: 1px solid #E2E8F0;
+}
+.card-3d:hover {
+  transform: translateY(-8px);
+  box-shadow:
+    0 20px 25px -5px rgba(0, 0, 0, 0.1),
+    0 10px 10px -5px rgba(0, 0, 0, 0.04),
+    0 0 0 1px rgba(20, 123, 93, 0.1);
+}
+
+/* ─── Input glass ─── */
+.input-glass {
+  background: #FFFFFF;
+  border: 1px solid #CBD5E1;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+  outline: none;
+  color: var(--color-slate-900);
+}
+.input-glass:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(20, 123, 93, 0.2);
+}
+
+/* ─── Gradient text ─── */
+.gradient-text {
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-saffron) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ─── Floating ─── */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-8px); }
+}
+.floating { animation: float 3s ease-in-out infinite; }
+.float    { animation: float 4s ease-in-out infinite; }
+.float-delay  { animation: float 4s ease-in-out 1.3s infinite; }
+.float-delay2 { animation: float 4s ease-in-out 2.6s infinite; }
+
+/* ─── Pulse glow ─── */
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 4px var(--color-primary-light); }
+  50%       { box-shadow: 0 0 12px var(--color-primary-light), 0 0 22px rgba(34,197,94,0.5); }
+}
+.pulse-glow { animation: pulseGlow 2s ease-in-out infinite; }
+
+/* ─── Animated gradient blobs ─── */
+@keyframes blob-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33%       { transform: translate(40px, -30px) scale(1.08); }
+  66%       { transform: translate(-25px, 20px) scale(0.95); }
+}
+.blob-1 { animation: blob-drift   18s ease-in-out infinite; }
+.blob-2 { animation: blob-drift   22s ease-in-out infinite reverse; }
+
+/* ─── Dot bg pattern ─── */
+.dot-pattern {
+  background-image: radial-gradient(circle, rgba(15,23,42,0.05) 1px, transparent 1px);
+  background-size: 24px 24px;
+}

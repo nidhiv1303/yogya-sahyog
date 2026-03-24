@@ -6,7 +6,19 @@ from database import (init_db, get_db, User, GeneralInfo, EducationDetails,
                       AgricultureDetails, HealthDetails, HousingDetails,
                       SocialWelfareDetails, BusinessDetails, JobsDetails,
                       Document, CompiledSubmission, new_id)
-import uvicorn, os
+import uvicorn, os, tempfile
+
+# ── Whisper model (loaded once at startup) ─────────────────
+# Install: pip install faster-whisper
+# Uses CUDA if available (RTX 5070), falls back to CPU
+try:
+    from faster_whisper import WhisperModel
+    _whisper = WhisperModel("base", device="auto", compute_type="auto")
+    WHISPER_READY = True
+    print("✅ faster-whisper loaded (base model, auto device)")
+except ImportError:
+    WHISPER_READY = False
+    print("⚠️  faster-whisper not installed. Run: pip install faster-whisper")
 
 app = FastAPI(title="Sahyog API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -395,6 +407,33 @@ def get_all_submissions(db: Session = Depends(get_db)):
             for s in subs
         ]
     }
+
+# ── VOICE TRANSCRIPTION ───────────────────────────────────
+
+@app.post("/voice/transcribe")
+async def transcribe_voice(audio: UploadFile = File(...)):
+    if not WHISPER_READY:
+        return {"text": "", "error": "faster-whisper not installed. Run: pip install faster-whisper"}
+
+    contents = await audio.read()
+
+    # Write to a temp file — faster-whisper needs a file path
+    suffix = os.path.splitext(audio.filename or "recording.webm")[1] or ".webm"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(contents)
+        tmp_path = tmp.name
+
+    try:
+        # language=None → auto-detect (handles Hindi, Gujarati, English)
+        segments, info = _whisper.transcribe(tmp_path, language=None, beam_size=5)
+        text = " ".join(seg.text for seg in segments).strip()
+        print(f"🎤 Transcribed [{info.language}]: {text}")
+        return {"text": text, "language": info.language}
+    except Exception as e:
+        print(f"❌ Transcription error: {e}")
+        return {"text": "", "error": str(e)}
+    finally:
+        os.unlink(tmp_path)
 
 # ← THIS MUST STAY AT THE VERY BOTTOM
 if __name__ == "__main__":

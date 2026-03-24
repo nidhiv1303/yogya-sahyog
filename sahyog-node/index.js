@@ -141,6 +141,35 @@ app.get("/api/submissions/all", async (req, res) => {
     }
 });
 
+// ── VOICE TRANSCRIPTION ───────────────────────────────────
+
+// Receives audio blob from frontend, forwards to FastAPI /voice/transcribe
+app.post("/api/voice/transcribe", async (req, res) => {
+    try {
+        if (!req.files || !req.files.audio) {
+            return res.status(400).json({ error: "No audio file received" });
+        }
+
+        const audioFile = req.files.audio;
+        const form      = new FormData();
+        form.append("audio", audioFile.data, {
+            filename:    audioFile.name || "recording.webm",
+            contentType: audioFile.mimetype || "audio/webm",
+        });
+
+        const r = await axios.post(`${FASTAPI}/voice/transcribe`, form, {
+            headers: form.getHeaders(),
+            maxBodyLength: Infinity,
+        });
+
+        console.log(`🎤 Voice transcribed: "${r.data.text}"`);
+        res.json(r.data); // { text: "...", language: "hi" }
+    } catch (e) {
+        console.error("Voice transcription error:", e.message);
+        res.status(500).json({ error: e.message, text: "" });
+    }
+});
+
 app.listen(PORT, "0.0.0.0", () => {
     console.log(`Node server running on http://0.0.0.0:${PORT}`);
     console.log(`Forwarding to FastAPI at ${FASTAPI}`);
