@@ -8,3 +8,6 @@ data/
 node_modules/
 __pycache__/
 __pycache__
+rag/chroma_db/
+rag/db/chroma/
+*.sqlite3
