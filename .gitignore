@@ -1,3 +1,9 @@
+# Chroma DB / vector DB
+rag/chroma_db/
+rag/db/chroma/
+
+# SQLite files
+*.sqlite3
 data/
 node_modules/
 __pycache__/
